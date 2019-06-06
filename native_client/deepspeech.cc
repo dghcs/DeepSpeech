@@ -67,6 +67,9 @@ struct StreamingState {
   vector<float> audio_buffer_;
   vector<float> mfcc_buffer_;
   vector<float> batch_buffer_;
+  vector<float> previous_state_c_;
+  vector<float> previous_state_h_;
+
   ModelState* model_;
   DecoderState* decoder_state_;
 
@@ -237,7 +240,13 @@ void
 StreamingState::processBatch(const vector<float>& buf, unsigned int n_steps)
 {
   vector<float> logits;
-  model_->infer(buf.data(), n_steps, logits);
+  model_->infer(buf,
+                n_steps,
+                previous_state_c_,
+                previous_state_h_,
+                logits,
+                previous_state_c_,
+                previous_state_h_);
 
   const int cutoff_top_n = 40;
   const double cutoff_prob = 1.0;
@@ -330,11 +339,6 @@ DS_SetupStream(ModelState* aCtx,
 {
   *retval = nullptr;
 
-  int err = aCtx->initialize_state();
-  if (err != DS_ERR_OK) {
-    return err;
-  }
-
   std::unique_ptr<StreamingState> ctx(new StreamingState());
   if (!ctx) {
     std::cerr << "Could not allocate streaming state." << std::endl;
@@ -352,6 +356,8 @@ DS_SetupStream(ModelState* aCtx,
   ctx->mfcc_buffer_.reserve(aCtx->mfcc_feats_per_timestep_);
   ctx->mfcc_buffer_.resize(aCtx->n_features_*aCtx->n_context_, 0.f);
   ctx->batch_buffer_.reserve(aCtx->n_steps_ * aCtx->mfcc_feats_per_timestep_);
+  ctx->previous_state_c_.resize(aCtx->state_size_, 0.f);
+  ctx->previous_state_h_.resize(aCtx->state_size_, 0.f);
   ctx->model_ = aCtx;
 
   DecoderState *params = decoder_init(*aCtx->alphabet_, num_classes, aCtx->scorer_);
